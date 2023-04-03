@@ -1,0 +1,131 @@
+!wget  https://www.dropbox.com/s/0vyzjcqsdl6cqi2/state-farm-distracted-driver-detection.zip?dl=0
+!unzip /content/state-farm-distracted-driver-detection.zip?dl=0
+!unzip /content/imgs.zip
+import os
+import random
+import shutil
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+
+# Define the classes
+classes = ["c0", "c1", "c2", "c3", "c4", "c5", "c6", "c7", "c8", "c9"]
+
+# Set the path to the original dataset directory
+original_dataset_dir = "/content/train"
+
+# Set the path to the directory where the split datasets will be saved
+base_dir = "/content/split"
+if not os.path.exists(base_dir):
+    os.mkdir(base_dir)
+
+# Create directories for the train, validation, and test sets
+train_dir = os.path.join(base_dir, "train")
+os.mkdir(train_dir)
+validation_dir = os.path.join(base_dir, "validation")
+os.mkdir(validation_dir)
+
+# Create subdirectories for each class in the train and validation sets
+for cls in classes:
+    train_cls_dir = os.path.join(train_dir, cls)
+    os.mkdir(train_cls_dir)
+    validation_cls_dir = os.path.join(validation_dir, cls)
+    os.mkdir(validation_cls_dir)
+
+    # Set the path to the directory containing images of the current class
+    cls_dir = os.path.join(original_dataset_dir, cls)
+
+    # Get the list of image filenames for the current class
+    fnames = os.listdir(cls_dir)
+
+    # Shuffle the filenames randomly
+    random.shuffle(fnames)
+
+    # Divide the filenames into train and validation sets
+    split_index = int(0.8 * len(fnames)) # 80% train, 20% validation
+    train_fnames = fnames[:split_index]
+    validation_fnames = fnames[split_index:]
+
+    # Copy the train images to the train directories
+    for fname in train_fnames:
+        src = os.path.join(cls_dir, fname)
+        dst = os.path.join(train_cls_dir, fname)
+        shutil.copyfile(src, dst)
+
+    # Copy the validation images to the validation directories
+    for fname in validation_fnames:
+        src = os.path.join(cls_dir, fname)
+        dst = os.path.join(validation_cls_dir, fname)
+        shutil.copyfile(src, dst)
+
+# Set the batch size and input image size for the model
+batch_size = 150
+img_size = (224, 224)
+
+# Define data augmentation parameters for the train set
+train_datagen = ImageDataGenerator(
+    rescale=1./255,
+    rotation_range=20,
+    width_shift_range=0.2,
+    height_shift_range=0.2,
+    shear_range=0.2,
+    zoom_range=0.2,
+    horizontal_flip=True,
+    fill_mode='nearest')
+
+# Define data preprocessing parameters for the validation set
+validation_datagen = ImageDataGenerator(rescale=1./255)
+
+# Set up the data generators for the train and validation sets
+train_generator = train_datagen.flow_from_directory(
+    train_dir,
+    target_size=img_size,
+    batch_size=batch_size,
+    class_mode='categorical')
+
+validation_generator = validation_datagen.flow_from_directory(
+    validation_dir,
+    target_size=img_size,
+    batch_size=batch_size,
+    class_mode='categorical')
+
+# Define the model architecture
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Conv2D, MaxPooling2D, Flatten, Dense
+
+model = Sequential()
+model.add(Conv2D(32, (3, 3), activation='relu', input_shape=(224, 224, 3)))
+model.add(MaxPooling2D((2, 2)))
+model.add(Conv2D(64, (3, 3), activation='relu'))
+model.add(MaxPooling2D((2, 2)))
+model.add(Conv2D(128, (3, 3), activation='relu'))
+model.add(MaxPooling2D((2, 2)))
+model.add(Conv2D(128, (3, 3), activation='relu'))
+model.add(MaxPooling2D((2, 2)))
+model.add(Flatten())
+model.add(Dense(512, activation='relu'))
+model.add(Dense(10, activation='softmax'))
+
+model.compile(optimizer='rmsprop',
+loss='categorical_crossentropy',
+metrics=['accuracy'])
+
+#Train the model
+history = model.fit_generator(
+train_generator,
+steps_per_epoch=len(train_generator),
+epochs=30,
+validation_data=validation_generator,
+validation_steps=len(validation_generator))
+
+#Evaluate the model on the test set
+test_dir = "/content/test"
+test_datagen = ImageDataGenerator(rescale=1./255)
+test_generator = test_datagen.flow_from_directory(
+test_dir,
+target_size=img_size,
+batch_size=batch_size,
+class_mode='categorical')
+test_loss, test_acc = model.evaluate_generator(test_generator, steps=len(test_generator))
+print('test acc:', test_acc)
+
+#Save the model
+model.save('image_classification_model.h5')
